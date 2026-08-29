@@ -9,12 +9,12 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   const { id } = await params;
-  return NextResponse.json({ data: activitiesForLead(id) });
+  return NextResponse.json({ data: await activitiesForLead(id) });
 }
 
 export async function POST(request: Request, { params }: Context) {
   const { id } = await params;
-  const lead = getLead(id);
+  const lead = await getLead(id);
   if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
 
   let payload: Record<string, unknown>;
@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: Context) {
   const subject = String(payload.subject ?? "").trim();
   if (!subject) return NextResponse.json({ error: "subject is required" }, { status: 422 });
 
-  createActivity({
+  await createActivity({
     type,
     subject,
     body: payload.body ? String(payload.body) : null,
@@ -41,5 +41,5 @@ export async function POST(request: Request, { params }: Context) {
     completed: payload.completed !== false,
   });
 
-  return NextResponse.json({ data: activitiesForLead(id) }, { status: 201 });
+  return NextResponse.json({ data: await activitiesForLead(id) }, { status: 201 });
 }

@@ -8,8 +8,8 @@ import { listCompanies } from "@/lib/repositories/companies";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "파이프라인" };
 
-export default function PipelinePage() {
-  const pipeline = defaultPipeline();
+export default async function PipelinePage() {
+  const pipeline = await defaultPipeline();
 
   if (!pipeline) {
     return (
@@ -23,6 +23,14 @@ export default function PipelinePage() {
     );
   }
 
+  const [pipelines, stages, deals, users, companies] = await Promise.all([
+    listPipelines(),
+    listStages(pipeline.id),
+    listDeals({ pipelineId: pipeline.id }),
+    listUsers(),
+    listCompanies(),
+  ]);
+
   return (
     <div className="mx-auto max-w-[1600px]">
       <PageHeader
@@ -30,12 +38,12 @@ export default function PipelinePage() {
         description="카드를 끌어다 놓아 단계를 이동하거나, 카드 하단 선택 상자로 이동할 수 있습니다."
       />
       <PipelineBoard
-        pipelines={listPipelines()}
+        pipelines={pipelines}
         pipeline={pipeline}
-        stages={listStages(pipeline.id)}
-        initialDeals={listDeals({ pipelineId: pipeline.id })}
-        users={listUsers()}
-        companies={listCompanies()}
+        stages={stages}
+        initialDeals={deals}
+        users={users}
+        companies={companies}
       />
     </div>
   );

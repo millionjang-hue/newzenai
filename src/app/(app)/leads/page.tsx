@@ -6,8 +6,13 @@ import { listUsers } from "@/lib/repositories/users";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "리드" };
 
-export default function LeadsPage() {
-  const leads = listLeads({ limit: 25 });
+export default async function LeadsPage() {
+  const [leads, total, statusCounts, users] = await Promise.all([
+    listLeads({ limit: 25 }),
+    countLeads(),
+    leadStatusCounts(),
+    listUsers(),
+  ]);
 
   return (
     <div className="mx-auto max-w-[1400px]">
@@ -17,9 +22,9 @@ export default function LeadsPage() {
       />
       <LeadsWorkspace
         initialLeads={leads}
-        initialTotal={countLeads()}
-        statusCounts={leadStatusCounts()}
-        users={listUsers()}
+        initialTotal={total}
+        statusCounts={statusCounts}
+        users={users}
       />
     </div>
   );

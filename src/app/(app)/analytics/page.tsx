@@ -44,7 +44,7 @@ export default async function AnalyticsPage({
   const { months: monthsParam } = await searchParams;
   const months = clampMonths(Number(monthsParam ?? 12));
   const period = trailingMonths(months);
-  const pipeline = defaultPipeline();
+  const pipeline = await defaultPipeline();
 
   if (!pipeline) {
     return (
@@ -58,19 +58,36 @@ export default async function AnalyticsPage({
     );
   }
 
-  const metrics = kpis(period);
-  const trend = monthlyTrend(period);
-  const stages = pipelineByStage(pipeline.id);
+  // Twelve independent aggregates - issued together so the page waits on the
+  // slowest query rather than the sum of all of them.
+  const [
+    metrics,
+    trend,
+    stages,
+    funnel,
+    velocity,
+    sources,
+    reps,
+    statusMix,
+    lostReasons,
+    industries,
+    aging,
+    forecastRows,
+  ] = await Promise.all([
+    kpis(period),
+    monthlyTrend(period),
+    pipelineByStage(pipeline.id),
+    conversionFunnel(pipeline.id, period),
+    stageVelocity(pipeline.id),
+    sourcePerformance(period),
+    repPerformance(period),
+    leadStatusMix(period),
+    lostReasonMix(period),
+    industryMix(),
+    pipelineAging(),
+    forecast(4),
+  ]);
   const openStages = stages.filter((stage) => stage.kind === "open");
-  const funnel = conversionFunnel(pipeline.id, period);
-  const velocity = stageVelocity(pipeline.id);
-  const sources = sourcePerformance(period);
-  const reps = repPerformance(period);
-  const statusMix = leadStatusMix(period);
-  const lostReasons = lostReasonMix(period);
-  const industries = industryMix();
-  const aging = pipelineAging();
-  const forecastRows = forecast(4);
 
   const growth =
     metrics.previousWonValue > 0

@@ -1,4 +1,4 @@
-import { execute, query, queryOne, transaction } from "@/lib/db";
+import { execute, query, queryOne, transaction, type Tx } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import type { Lead, LeadStatus, LeadWithOwner } from "@/lib/types";
 import { defaultPipeline, listStages } from "@/lib/repositories/pipelines";
@@ -61,7 +61,7 @@ function whereClause(filter: LeadFilter) {
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-export function listLeads(filter: LeadFilter = {}): LeadWithOwner[] {
+export function listLeads(filter: LeadFilter = {}): Promise<LeadWithOwner[]> {
   const { sql, params } = whereClause(filter);
   const order = SORT_SQL[filter.sort ?? "created_desc"];
   const limit = filter.limit ?? 200;
@@ -71,7 +71,7 @@ export function listLeads(filter: LeadFilter = {}): LeadWithOwner[] {
     `SELECT l.*,
             u.name AS owner_name,
             u.avatar_color AS owner_color,
-            (SELECT COUNT(*) FROM activities a WHERE a.lead_id = l.id) AS activity_count
+            (SELECT COUNT(*)::int FROM activities a WHERE a.lead_id = l.id) AS activity_count
        FROM leads l
        LEFT JOIN users u ON u.id = l.owner_id
        ${sql}
@@ -81,31 +81,33 @@ export function listLeads(filter: LeadFilter = {}): LeadWithOwner[] {
   );
 }
 
-export function countLeads(filter: LeadFilter = {}): number {
+export async function countLeads(filter: LeadFilter = {}): Promise<number> {
   const { sql, params } = whereClause(filter);
-  const row = queryOne<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM leads l ${sql}`,
+  const row = await queryOne<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM leads l ${sql}`,
     params,
   );
   return row?.n ?? 0;
 }
 
-export function leadStatusCounts(filter: LeadFilter = {}): Record<string, number> {
+export async function leadStatusCounts(
+  filter: LeadFilter = {},
+): Promise<Record<string, number>> {
   const scoped: LeadFilter = { ...filter, status: "all" };
   const { sql, params } = whereClause(scoped);
-  const rows = query<{ status: LeadStatus; n: number }>(
-    `SELECT l.status AS status, COUNT(*) AS n FROM leads l ${sql} GROUP BY l.status`,
+  const rows = await query<{ status: LeadStatus; n: number }>(
+    `SELECT l.status AS status, COUNT(*)::int AS n FROM leads l ${sql} GROUP BY l.status`,
     params,
   );
   return Object.fromEntries(rows.map((r) => [r.status, r.n]));
 }
 
-export function getLead(id: string): LeadWithOwner | null {
+export function getLead(id: string): Promise<LeadWithOwner | null> {
   return queryOne<LeadWithOwner>(
     `SELECT l.*,
             u.name AS owner_name,
             u.avatar_color AS owner_color,
-            (SELECT COUNT(*) FROM activities a WHERE a.lead_id = l.id) AS activity_count
+            (SELECT COUNT(*)::int FROM activities a WHERE a.lead_id = l.id) AS activity_count
        FROM leads l
        LEFT JOIN users u ON u.id = l.owner_id
       WHERE l.id = ?`,
@@ -128,11 +130,11 @@ export interface LeadInput {
   notes?: string | null;
 }
 
-export function createLead(input: LeadInput): Lead {
+export async function createLead(input: LeadInput): Promise<Lead> {
   const now = new Date().toISOString();
   const id = newId("lead");
 
-  execute(
+  await execute(
     `INSERT INTO leads (id, first_name, last_name, email, phone, title, company_name,
                         company_id, source, status, score, owner_id, estimated_value,
                         notes, last_touch_at, created_at, updated_at)
@@ -157,7 +159,7 @@ export function createLead(input: LeadInput): Lead {
     ],
   );
 
-  return getLead(id) as Lead;
+  return (await getLead(id)) as Lead;
 }
 
 const UPDATABLE = new Set([
@@ -175,7 +177,10 @@ const UPDATABLE = new Set([
   "notes",
 ]);
 
-export function updateLead(id: string, patch: Record<string, unknown>): Lead | null {
+export async function updateLead(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<Lead | null> {
   const entries = Object.entries(patch).filter(([key]) => UPDATABLE.has(key));
   if (entries.length === 0) return getLead(id);
 
@@ -186,7 +191,7 @@ export function updateLead(id: string, patch: Record<string, unknown>): Lead | n
     return (value ?? null) as string | number | null;
   });
 
-  execute(`UPDATE leads SET ${sets}, updated_at = ? WHERE id = ?`, [
+  await execute(`UPDATE leads SET ${sets}, updated_at = ? WHERE id = ?`, [
     ...values,
     new Date().toISOString(),
     id,
@@ -194,8 +199,8 @@ export function updateLead(id: string, patch: Record<string, unknown>): Lead | n
   return getLead(id);
 }
 
-export function deleteLead(id: string): void {
-  execute(`DELETE FROM leads WHERE id = ?`, [id]);
+export async function deleteLead(id: string): Promise<void> {
+  await execute(`DELETE FROM leads WHERE id = ?`, [id]);
 }
 
 export interface ConvertLeadOptions {
@@ -209,27 +214,27 @@ export interface ConvertLeadOptions {
  * creates (or reuses) the company + contact, opens a deal in the first stage,
  * records the stage event, and re-parents the lead's activity history.
  */
-export function convertLead(id: string, options: ConvertLeadOptions = {}) {
-  const lead = getLead(id);
+export async function convertLead(id: string, options: ConvertLeadOptions = {}) {
+  const lead = await getLead(id);
   if (!lead) return { ok: false as const, error: "Lead not found" };
   if (lead.status === "converted") {
     return { ok: false as const, error: "Lead has already been converted" };
   }
 
-  const pipeline = defaultPipeline();
+  const pipeline = await defaultPipeline();
   if (!pipeline) return { ok: false as const, error: "No pipeline configured" };
 
-  const stages = listStages(pipeline.id).filter((s) => s.kind === "open");
+  const stages = (await listStages(pipeline.id)).filter((s) => s.kind === "open");
   const firstStage = stages[0];
   if (!firstStage) return { ok: false as const, error: "Pipeline has no open stage" };
 
   const now = new Date().toISOString();
   const ownerId = options.ownerId ?? lead.owner_id;
 
-  return transaction(() => {
+  return transaction(async (tx: Tx) => {
     let companyId = lead.company_id;
     if (!companyId) {
-      const existing = queryOne<{ id: string }>(
+      const existing = await tx.queryOne<{ id: string }>(
         `SELECT id FROM companies WHERE lower(name) = lower(?) LIMIT 1`,
         [lead.company_name],
       );
@@ -237,7 +242,7 @@ export function convertLead(id: string, options: ConvertLeadOptions = {}) {
         companyId = existing.id;
       } else {
         companyId = newId("comp");
-        execute(
+        await tx.execute(
           `INSERT INTO companies (id, name, domain, industry, size, country, annual_revenue, created_at)
            VALUES (?, ?, ?, 'Unclassified', '11-50', 'KR', NULL, ?)`,
           [companyId, lead.company_name, domainFromEmail(lead.email), now],
@@ -245,13 +250,15 @@ export function convertLead(id: string, options: ConvertLeadOptions = {}) {
       }
     }
 
-    let contactId = queryOne<{ id: string }>(
-      `SELECT id FROM contacts WHERE lower(email) = lower(?) LIMIT 1`,
-      [lead.email],
+    let contactId = (
+      await tx.queryOne<{ id: string }>(
+        `SELECT id FROM contacts WHERE lower(email) = lower(?) LIMIT 1`,
+        [lead.email],
+      )
     )?.id;
     if (!contactId) {
       contactId = newId("cont");
-      execute(
+      await tx.execute(
         `INSERT INTO contacts (id, company_id, first_name, last_name, email, phone, title, is_primary, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
@@ -273,12 +280,14 @@ export function convertLead(id: string, options: ConvertLeadOptions = {}) {
       options.expectedCloseDate ??
       new Date(Date.now() + 45 * 86_400_000).toISOString().slice(0, 10);
     const maxPosition =
-      queryOne<{ p: number | null }>(
-        `SELECT MAX(position) AS p FROM deals WHERE stage_id = ?`,
-        [firstStage.id],
+      (
+        await tx.queryOne<{ p: number | null }>(
+          `SELECT MAX(position) AS p FROM deals WHERE stage_id = ?`,
+          [firstStage.id],
+        )
       )?.p ?? 0;
 
-    execute(
+    await tx.execute(
       `INSERT INTO deals (id, title, pipeline_id, stage_id, company_id, contact_id, owner_id,
                           source_lead_id, amount, currency, probability, status, position,
                           expected_close_date, created_at, updated_at)
@@ -301,19 +310,19 @@ export function convertLead(id: string, options: ConvertLeadOptions = {}) {
       ],
     );
 
-    execute(
+    await tx.execute(
       `INSERT INTO deal_stage_events (id, deal_id, from_stage_id, to_stage_id, actor_id, occurred_at)
        VALUES (?, ?, NULL, ?, ?, ?)`,
       [newId("evt"), dealId, firstStage.id, ownerId, now],
     );
 
-    execute(`UPDATE activities SET deal_id = ?, contact_id = ? WHERE lead_id = ?`, [
+    await tx.execute(`UPDATE activities SET deal_id = ?, contact_id = ? WHERE lead_id = ?`, [
       dealId,
       contactId,
       lead.id,
     ]);
 
-    execute(
+    await tx.execute(
       `UPDATE leads
           SET status = 'converted', company_id = ?, converted_deal_id = ?,
               converted_at = ?, updated_at = ?

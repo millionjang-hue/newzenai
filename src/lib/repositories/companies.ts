@@ -8,12 +8,12 @@ export interface CompanyRow extends Company {
   won_value: number;
 }
 
-export function listCompanies(search = ""): CompanyRow[] {
+export function listCompanies(search = ""): Promise<CompanyRow[]> {
   const like = `%${search.trim()}%`;
   return query<CompanyRow>(
     `SELECT c.*,
-            (SELECT COUNT(*) FROM contacts ct WHERE ct.company_id = c.id) AS contact_count,
-            (SELECT COUNT(*) FROM deals d WHERE d.company_id = c.id AND d.status = 'open') AS open_deal_count,
+            (SELECT COUNT(*)::int FROM contacts ct WHERE ct.company_id = c.id) AS contact_count,
+            (SELECT COUNT(*)::int FROM deals d WHERE d.company_id = c.id AND d.status = 'open') AS open_deal_count,
             (SELECT COALESCE(SUM(d.amount), 0) FROM deals d WHERE d.company_id = c.id AND d.status = 'open') AS open_value,
             (SELECT COALESCE(SUM(d.amount), 0) FROM deals d WHERE d.company_id = c.id AND d.status = 'won') AS won_value
        FROM companies c
@@ -23,7 +23,7 @@ export function listCompanies(search = ""): CompanyRow[] {
   );
 }
 
-export function getCompany(id: string): Company | null {
+export function getCompany(id: string): Promise<Company | null> {
   return queryOne<Company>(`SELECT * FROM companies WHERE id = ?`, [id]);
 }
 
@@ -32,12 +32,12 @@ export interface ContactRow extends Contact {
   open_deal_count: number;
 }
 
-export function listContacts(search = ""): ContactRow[] {
+export function listContacts(search = ""): Promise<ContactRow[]> {
   const like = `%${search.trim()}%`;
   return query<ContactRow>(
     `SELECT ct.*,
             co.name AS company_name,
-            (SELECT COUNT(*) FROM deals d WHERE d.contact_id = ct.id AND d.status = 'open') AS open_deal_count
+            (SELECT COUNT(*)::int FROM deals d WHERE d.contact_id = ct.id AND d.status = 'open') AS open_deal_count
        FROM contacts ct
        LEFT JOIN companies co ON co.id = ct.company_id
       WHERE (? = ''

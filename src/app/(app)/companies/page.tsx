@@ -12,7 +12,7 @@ export default async function CompaniesPage({
 }) {
   const { q } = await searchParams;
   const search = q ?? "";
-  const companies = listCompanies(search);
+  const companies = await listCompanies(search);
   const maxValue = Math.max(1, ...companies.map((company) => company.won_value + company.open_value));
   const totalWon = companies.reduce((sum, company) => sum + company.won_value, 0);
   const totalOpen = companies.reduce((sum, company) => sum + company.open_value, 0);

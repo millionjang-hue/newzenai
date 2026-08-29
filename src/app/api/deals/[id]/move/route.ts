@@ -16,7 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const stageId = String(payload.stage_id ?? "");
   if (!stageId) return NextResponse.json({ error: "stage_id is required" }, { status: 422 });
 
-  const deal = moveDeal(id, {
+  const deal = await moveDeal(id, {
     stageId,
     orderedIds: Array.isArray(payload.ordered_ids)
       ? (payload.ordered_ids as unknown[]).map(String)

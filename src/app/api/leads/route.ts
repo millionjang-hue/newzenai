@@ -23,12 +23,14 @@ export async function GET(request: Request) {
     offset: Math.max(0, Number(params.get("offset") ?? 0)),
   };
 
-  return NextResponse.json({
-    data: listLeads(filter),
-    total: countLeads(filter),
-    // Counts cover the whole filtered set, not just the returned page.
-    counts: leadStatusCounts(filter),
-  });
+  // Counts cover the whole filtered set, not just the returned page.
+  const [data, total, counts] = await Promise.all([
+    listLeads(filter),
+    countLeads(filter),
+    leadStatusCounts(filter),
+  ]);
+
+  return NextResponse.json({ data, total, counts });
 }
 
 export async function POST(request: Request) {
@@ -53,7 +55,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid email address" }, { status: 422 });
   }
 
-  const lead = createLead({
+  const lead = await createLead({
     first_name: String(payload.first_name).trim(),
     last_name: String(payload.last_name).trim(),
     email: email.trim(),

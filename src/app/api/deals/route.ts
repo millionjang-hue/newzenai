@@ -6,11 +6,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
-  const pipelineId = params.get("pipeline") ?? defaultPipeline()?.id;
+  const pipelineId = params.get("pipeline") ?? (await defaultPipeline())?.id;
   if (!pipelineId) return NextResponse.json({ error: "No pipeline configured" }, { status: 404 });
 
   return NextResponse.json({
-    data: listDeals({
+    data: await listDeals({
       pipelineId,
       ownerId: params.get("owner") ?? "all",
       search: params.get("q") ?? "",
@@ -33,10 +33,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "stage_id is required" }, { status: 422 });
   }
 
-  const pipelineId = payload.pipeline_id ? String(payload.pipeline_id) : defaultPipeline()?.id;
+  const pipelineId = payload.pipeline_id
+    ? String(payload.pipeline_id)
+    : (await defaultPipeline())?.id;
   if (!pipelineId) return NextResponse.json({ error: "No pipeline configured" }, { status: 404 });
 
-  const deal = createDeal({
+  const deal = await createDeal({
     title,
     pipeline_id: pipelineId,
     stage_id: String(payload.stage_id),

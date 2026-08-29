@@ -35,13 +35,19 @@ const ACTIVITY_ICON: Record<string, string> = {
   task: "☑",
 };
 
-export default function DashboardPage() {
-  const pipeline = defaultPipeline();
+export default async function DashboardPage() {
   const period = trailingMonths(12);
-  const metrics = kpis(period);
-  const trend = monthlyTrend(period);
-  const stages = pipeline ? pipelineByStage(pipeline.id).filter((s) => s.kind === "open") : [];
-  const reps = repPerformance(trailingMonths(3)).slice(0, 5);
+  const pipeline = await defaultPipeline();
+
+  // Independent queries - run them together rather than in sequence.
+  const [metrics, trend, allStages, reps] = await Promise.all([
+    kpis(period),
+    monthlyTrend(period),
+    pipeline ? pipelineByStage(pipeline.id) : Promise.resolve([]),
+    repPerformance(trailingMonths(3)),
+  ]);
+  const stages = allStages.filter((stage) => stage.kind === "open");
+  const topReps = reps.slice(0, 5);
 
   const growth =
     metrics.previousWonValue > 0
@@ -49,9 +55,13 @@ export default function DashboardPage() {
       : null;
 
   const today = new Date().toISOString().slice(0, 10);
-  const openDeals = listDeals({ pipelineId: pipeline?.id, status: "open" }).filter(
-    (deal) => deal.expected_close_date,
-  );
+  const [rawOpenDeals, hotLeads, tasks, activities] = await Promise.all([
+    listDeals({ pipelineId: pipeline?.id, status: "open" }),
+    listLeads({ status: "qualified", sort: "score_desc", limit: 6 }),
+    openTasks(6),
+    recentActivities(7),
+  ]);
+  const openDeals = rawOpenDeals.filter((deal) => deal.expected_close_date);
   const overdue = openDeals
     .filter((deal) => deal.expected_close_date! < today)
     .sort((a, b) => (a.expected_close_date! < b.expected_close_date! ? -1 : 1));
@@ -63,10 +73,7 @@ export default function DashboardPage() {
       .sort((a, b) => (a.expected_close_date! < b.expected_close_date! ? -1 : 1)),
   ].slice(0, 6);
 
-  const hotLeads = listLeads({ status: "qualified", sort: "score_desc", limit: 6 });
-  const tasks = openTasks(6);
-  const activities = recentActivities(7);
-  const maxRepValue = Math.max(1, ...reps.map((rep) => rep.wonValue));
+  const maxRepValue = Math.max(1, ...topReps.map((rep) => rep.wonValue));
 
   return (
     <div className="mx-auto max-w-[1400px]">
@@ -290,7 +297,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
-              {reps.map((rep) => (
+              {topReps.map((rep) => (
                 <tr key={rep.ownerId}>
                   <td className="py-2.5">
                     <span className="flex items-center gap-2">

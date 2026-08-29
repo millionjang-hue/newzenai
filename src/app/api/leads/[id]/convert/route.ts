@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // An empty body is valid - the lead's own estimate is used.
   }
 
-  const result = convertLead(id, {
+  const result = await convertLead(id, {
     amount: payload.amount === undefined ? undefined : Number(payload.amount),
     expectedCloseDate: payload.expected_close_date
       ? String(payload.expected_close_date)

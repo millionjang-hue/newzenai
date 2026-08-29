@@ -26,18 +26,14 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0 \
-    CRM_DATABASE_PATH=/app/data/crm.db
+    HOSTNAME=0.0.0.0
 
 RUN addgroup -S -g 1001 crm && adduser -S -u 1001 -G crm crm
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# The SQLite file lives here. Mount a volume so data survives a rebuild.
-RUN mkdir -p /app/data && chown -R crm:crm /app/data
-VOLUME ["/app/data"]
-
+# State lives in PostgreSQL (DATABASE_URL), so the image itself is stateless.
 USER crm
 EXPOSE 3000
 CMD ["node", "server.js"]

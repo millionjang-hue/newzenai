@@ -1,15 +1,33 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: newzen_crm
+    ports:
+      # Exposed so `npm run dev` on the host can use the same database.
+      - "5432:5432"
+    volumes:
+      - crm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d newzen_crm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   crm:
     build: .
     ports:
       - "3000:3000"
-    volumes:
-      # Keeps the SQLite file across rebuilds.
-      - crm-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/newzen_crm
       # Set to "0" to start empty instead of loading the demo dataset.
       CRM_AUTO_SEED: "1"
     restart: unless-stopped
 
 volumes:
-  crm-data:
+  crm-pgdata:

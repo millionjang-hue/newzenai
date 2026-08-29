@@ -6,10 +6,62 @@
  * they have moved through earlier stages, activity volume tracks deal size, and
  * rep performance varies enough for the analytics tab to be interesting.
  *
- * Called from `scripts/seed.ts` (the CLI) and from `getDb()` on first run, so a
- * fresh checkout has data without anyone remembering to seed it.
+ * Called from `scripts/seed.ts` (the CLI) and from the app's first-run
+ * bootstrap, so a fresh database has data without anyone remembering to seed it.
  */
-import type { DatabaseSync } from "node:sqlite";
+import { TABLES_IN_DEPENDENCY_ORDER } from "./schema";
+
+/** The subset of a `pg` Client/PoolClient this module needs. */
+export interface SeedClient {
+  query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
+}
+
+type Row = (string | number | null)[];
+
+/**
+ * Buffers rows per INSERT statement and flushes them as multi-row INSERTs.
+ * The generator writes ~6,000 rows; one round-trip each would make seeding a
+ * remote database painfully slow.
+ */
+class BatchWriter {
+  private readonly order: string[] = [];
+  private readonly buffers = new Map<string, Row[]>();
+
+  statement(sql: string) {
+    if (!this.buffers.has(sql)) {
+      this.order.push(sql);
+      this.buffers.set(sql, []);
+    }
+    const rows = this.buffers.get(sql)!;
+    return { rows, run: (...values: Row) => rows.push(values) };
+  }
+
+  /** Flushes in the order statements were declared, which is FK-safe. */
+  async flush(client: SeedClient): Promise<void> {
+    for (const sql of this.order) {
+      const rows = this.buffers.get(sql)!;
+      if (rows.length === 0) continue;
+
+      const match = /^([\s\S]*VALUES\s*)(\([\s\S]*\))\s*$/i.exec(sql);
+      if (!match) throw new Error(`Not a batchable INSERT: ${sql.slice(0, 60)}`);
+      const [, head, tuple] = match as unknown as [string, string, string];
+      const perRow = (tuple.match(/\?/g) ?? []).length;
+
+      // Postgres caps a statement at 65535 bound parameters.
+      const chunkSize = Math.max(1, Math.floor(60_000 / Math.max(1, perRow)));
+      for (let start = 0; start < rows.length; start += chunkSize) {
+        const chunk = rows.slice(start, start + chunkSize);
+        let index = 0;
+        const values: Row = [];
+        const tuples = chunk.map((row) => {
+          values.push(...row);
+          return tuple.replace(/\?/g, () => `$${++index}`);
+        });
+        await client.query(`${head}${tuples.join(", ")}`, values);
+      }
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // reference data
@@ -95,7 +147,10 @@ export interface SeedSummary {
 }
 
 /** Wipes the CRM tables and refills them. The schema must already be applied. */
-export function seedDatabase(db: DatabaseSync, options: SeedOptions = {}): SeedSummary {
+export async function seedDatabase(
+  db: SeedClient,
+  options: SeedOptions = {},
+): Promise<SeedSummary> {
   // ---------------------------------------------------------------------------
   // deterministic RNG (mulberry32)
   // ---------------------------------------------------------------------------
@@ -154,18 +209,13 @@ export function seedDatabase(db: DatabaseSync, options: SeedOptions = {}): SeedS
     return d > to ? to : d;
   }
 
-    // Start from a clean slate so seeding is idempotent.
-    db.exec("PRAGMA foreign_keys = OFF");
-    for (const table of [
-    "deal_stage_events", "activities", "deals", "leads",
-    "contacts", "companies", "stages", "pipelines", "users",
-  ]) {
-    db.exec(`DELETE FROM ${table}`);
-  }
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("BEGIN");
+  // Start from a clean slate so seeding is idempotent. TRUNCATE ... CASCADE
+  // clears the whole graph in one statement regardless of FK order.
+  await db.query("BEGIN");
+  await db.query(`TRUNCATE ${TABLES_IN_DEPENDENCY_ORDER.join(", ")} CASCADE`);
 
-  const insert = (sql: string) => db.prepare(sql);
+  const writer = new BatchWriter();
+  const insert = (sql: string) => writer.statement(sql);
 
   // --- users -----------------------------------------------------------------
   const userStmt = insert(
@@ -401,10 +451,19 @@ export function seedDatabase(db: DatabaseSync, options: SeedOptions = {}): SeedS
     `INSERT INTO deal_stage_events (id, deal_id, from_stage_id, to_stage_id, actor_id, occurred_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
-  const leadConvertStmt = db.prepare(
-    `UPDATE leads SET converted_deal_id = ?, converted_at = ?, company_id = COALESCE(company_id, ?),
-                      updated_at = ? WHERE id = ?`,
-  );
+  // The lead rows are still sitting in the writer's buffer, so a conversion is
+  // applied by patching the pending row rather than issuing an UPDATE later.
+  const LEAD_COL = { company_id: 7, converted_deal_id: 14, converted_at: 15, updated_at: 18 };
+  const leadConvertStmt = {
+    run: (dealId: string, convertedAt: string, companyId: string, updatedAt: string, leadId: string) => {
+      const row = leadStmt.rows.find((candidate) => candidate[0] === leadId);
+      if (!row) throw new Error(`Unknown lead ${leadId}`);
+      row[LEAD_COL.converted_deal_id] = dealId;
+      row[LEAD_COL.converted_at] = convertedAt;
+      row[LEAD_COL.company_id] = row[LEAD_COL.company_id] ?? companyId;
+      row[LEAD_COL.updated_at] = updatedAt;
+    },
+  };
 
   interface SeedDeal {
     id: string; ownerId: string; createdAt: Date; closedAt: Date | null;
@@ -653,27 +712,30 @@ export function seedDatabase(db: DatabaseSync, options: SeedOptions = {}): SeedS
     }
   }
 
-  db.exec("COMMIT");
+  try {
+    await writer.flush(db);
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  }
 
-  const count = (table: string) =>
-    (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  const scalar = async (sql: string, values: unknown[] = []) =>
+    Number((((await db.query(sql, values)).rows[0] ?? { v: 0 }) as { v: number }).v);
+  const count = (table: string) => scalar(`SELECT COUNT(*)::int AS v FROM ${table}`);
   const sumBy = (status: string) =>
-    (
-      db
-        .prepare(`SELECT COALESCE(SUM(amount), 0) AS v FROM deals WHERE status = ?`)
-        .get(status) as { v: number }
-    ).v;
+    scalar(`SELECT COALESCE(SUM(amount), 0)::bigint AS v FROM deals WHERE status = $1`, [status]);
 
   return {
-    users: count("users"),
-    companies: count("companies"),
-    contacts: count("contacts"),
-    leads: count("leads"),
-    deals: count("deals"),
-    stageEvents: count("deal_stage_events"),
-    activities: count("activities"),
-    wonValue: sumBy("won"),
-    openValue: sumBy("open"),
+    users: await count("users"),
+    companies: await count("companies"),
+    contacts: await count("contacts"),
+    leads: await count("leads"),
+    deals: await count("deals"),
+    stageEvents: await count("deal_stage_events"),
+    activities: await count("activities"),
+    wonValue: await sumBy("won"),
+    openValue: await sumBy("open"),
     from: isoDay(START),
     to: isoDay(NOW),
     seed: SEED,

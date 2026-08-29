@@ -7,14 +7,14 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   const { id } = await params;
-  const lead = getLead(id);
+  const lead = await getLead(id);
   if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
   return NextResponse.json({ data: lead });
 }
 
 export async function PATCH(request: Request, { params }: Context) {
   const { id } = await params;
-  if (!getLead(id)) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+  if (!(await getLead(id))) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
 
   let payload: Record<string, unknown>;
   try {
@@ -23,12 +23,12 @@ export async function PATCH(request: Request, { params }: Context) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  return NextResponse.json({ data: updateLead(id, payload) });
+  return NextResponse.json({ data: await updateLead(id, payload) });
 }
 
 export async function DELETE(_request: Request, { params }: Context) {
   const { id } = await params;
-  if (!getLead(id)) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-  deleteLead(id);
+  if (!(await getLead(id))) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+  await deleteLead(id);
   return NextResponse.json({ ok: true });
 }

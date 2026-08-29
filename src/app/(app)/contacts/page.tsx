@@ -12,7 +12,7 @@ export default async function ContactsPage({
 }) {
   const { q } = await searchParams;
   const search = q ?? "";
-  const contacts = listContacts(search);
+  const contacts = await listContacts(search);
 
   return (
     <div className="mx-auto max-w-[1400px]">

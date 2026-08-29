@@ -4,8 +4,9 @@ import { listPipelines, listStages } from "@/lib/repositories/pipelines";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const pipelines = listPipelines();
-  return NextResponse.json({
-    data: pipelines.map((pipeline) => ({ ...pipeline, stages: listStages(pipeline.id) })),
-  });
+  const pipelines = await listPipelines();
+  const withStages = await Promise.all(
+    pipelines.map(async (pipeline) => ({ ...pipeline, stages: await listStages(pipeline.id) })),
+  );
+  return NextResponse.json({ data: withStages });
 }

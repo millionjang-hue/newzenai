@@ -1,4 +1,4 @@
-import { execute, query, queryOne, transaction } from "@/lib/db";
+import { execute, query, queryOne, transaction, type Tx } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import type { Deal, DealWithRelations, Stage } from "@/lib/types";
 import { getStage, listStages } from "@/lib/repositories/pipelines";
@@ -26,7 +26,7 @@ const SELECT_DEAL = `
     LEFT JOIN users u ON u.id = d.owner_id
 `;
 
-export function listDeals(filter: DealFilter = {}): DealWithRelations[] {
+export function listDeals(filter: DealFilter = {}): Promise<DealWithRelations[]> {
   const clauses: string[] = [];
   const params: (string | number)[] = [];
 
@@ -56,7 +56,7 @@ export function listDeals(filter: DealFilter = {}): DealWithRelations[] {
   );
 }
 
-export function getDeal(id: string): DealWithRelations | null {
+export function getDeal(id: string): Promise<DealWithRelations | null> {
   return queryOne<DealWithRelations>(`${SELECT_DEAL} WHERE d.id = ?`, [id]);
 }
 
@@ -71,19 +71,22 @@ export interface DealInput {
   expected_close_date?: string | null;
 }
 
-export function createDeal(input: DealInput): DealWithRelations | null {
-  const stage = getStage(input.stage_id);
+export async function createDeal(input: DealInput): Promise<DealWithRelations | null> {
+  const stage = await getStage(input.stage_id);
   if (!stage) return null;
 
   const now = new Date().toISOString();
   const id = newId("deal");
   const maxPosition =
-    queryOne<{ p: number | null }>(`SELECT MAX(position) AS p FROM deals WHERE stage_id = ?`, [
-      stage.id,
-    ])?.p ?? 0;
+    (
+      await queryOne<{ p: number | null }>(
+        `SELECT MAX(position) AS p FROM deals WHERE stage_id = ?`,
+        [stage.id],
+      )
+    )?.p ?? 0;
 
-  return transaction(() => {
-    execute(
+  await transaction(async (tx: Tx) => {
+    await tx.execute(
       `INSERT INTO deals (id, title, pipeline_id, stage_id, company_id, contact_id, owner_id,
                           amount, currency, probability, status, position, expected_close_date,
                           closed_at, created_at, updated_at)
@@ -106,13 +109,14 @@ export function createDeal(input: DealInput): DealWithRelations | null {
         now,
       ],
     );
-    execute(
+    await tx.execute(
       `INSERT INTO deal_stage_events (id, deal_id, from_stage_id, to_stage_id, actor_id, occurred_at)
        VALUES (?, ?, NULL, ?, ?, ?)`,
       [newId("evt"), id, stage.id, input.owner_id ?? null, now],
     );
-    return getDeal(id);
   });
+
+  return getDeal(id);
 }
 
 const UPDATABLE = new Set([
@@ -126,7 +130,10 @@ const UPDATABLE = new Set([
   "probability",
 ]);
 
-export function updateDeal(id: string, patch: Record<string, unknown>): DealWithRelations | null {
+export async function updateDeal(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<DealWithRelations | null> {
   const entries = Object.entries(patch).filter(([key]) => UPDATABLE.has(key));
   if (entries.length === 0) return getDeal(id);
 
@@ -137,7 +144,7 @@ export function updateDeal(id: string, patch: Record<string, unknown>): DealWith
     return (value ?? null) as string | number | null;
   });
 
-  execute(`UPDATE deals SET ${sets}, updated_at = ? WHERE id = ?`, [
+  await execute(`UPDATE deals SET ${sets}, updated_at = ? WHERE id = ?`, [
     ...values,
     new Date().toISOString(),
     id,
@@ -158,19 +165,22 @@ export interface MoveDealOptions {
  * Won/lost stages stamp `closed_at` and force probability to 1/0 so forecast
  * numbers stay consistent with the board.
  */
-export function moveDeal(id: string, options: MoveDealOptions): DealWithRelations | null {
-  const deal = queryOne<Deal>(`SELECT * FROM deals WHERE id = ?`, [id]);
+export async function moveDeal(
+  id: string,
+  options: MoveDealOptions,
+): Promise<DealWithRelations | null> {
+  const deal = await queryOne<Deal>(`SELECT * FROM deals WHERE id = ?`, [id]);
   if (!deal) return null;
-  const stage = getStage(options.stageId);
+  const stage = await getStage(options.stageId);
   if (!stage || stage.pipeline_id !== deal.pipeline_id) return null;
 
   const now = new Date().toISOString();
 
-  return transaction(() => {
+  await transaction(async (tx: Tx) => {
     const probability = stage.kind === "won" ? 1 : stage.kind === "lost" ? 0 : stage.probability;
     const closedAt = stage.kind === "open" ? null : (deal.closed_at ?? now);
 
-    execute(
+    await tx.execute(
       `UPDATE deals
           SET stage_id = ?, status = ?, probability = ?, closed_at = ?,
               lost_reason = ?, updated_at = ?
@@ -187,7 +197,7 @@ export function moveDeal(id: string, options: MoveDealOptions): DealWithRelation
     );
 
     if (deal.stage_id !== stage.id) {
-      execute(
+      await tx.execute(
         `INSERT INTO deal_stage_events (id, deal_id, from_stage_id, to_stage_id, actor_id, occurred_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [newId("evt"), id, deal.stage_id, stage.id, options.actorId ?? null, now],
@@ -195,20 +205,20 @@ export function moveDeal(id: string, options: MoveDealOptions): DealWithRelation
     }
 
     const ordered = options.orderedIds?.length ? options.orderedIds : [id];
-    ordered.forEach((dealId, index) => {
-      execute(`UPDATE deals SET position = ? WHERE id = ? AND stage_id = ?`, [
+    for (const [index, dealId] of ordered.entries()) {
+      await tx.execute(`UPDATE deals SET position = ? WHERE id = ? AND stage_id = ?`, [
         (index + 1) * 1000,
         dealId,
         stage.id,
       ]);
-    });
-
-    return getDeal(id);
+    }
   });
+
+  return getDeal(id);
 }
 
-export function deleteDeal(id: string): void {
-  execute(`DELETE FROM deals WHERE id = ?`, [id]);
+export async function deleteDeal(id: string): Promise<void> {
+  await execute(`DELETE FROM deals WHERE id = ?`, [id]);
 }
 
 export interface BoardColumn {
@@ -219,9 +229,14 @@ export interface BoardColumn {
 }
 
 /** Pipeline board grouped by stage, with per-column totals. */
-export function boardForPipeline(pipelineId: string, filter: DealFilter = {}): BoardColumn[] {
-  const stages = listStages(pipelineId);
-  const deals = listDeals({ ...filter, pipelineId });
+export async function boardForPipeline(
+  pipelineId: string,
+  filter: DealFilter = {},
+): Promise<BoardColumn[]> {
+  const [stages, deals] = await Promise.all([
+    listStages(pipelineId),
+    listDeals({ ...filter, pipelineId }),
+  ]);
 
   return stages.map((stage) => {
     const columnDeals = deals.filter((d) => d.stage_id === stage.id);
