@@ -30,6 +30,11 @@ declare global {
   var __crmReady: Promise<void> | undefined;
 }
 
+/** True when a connection string is present - checked before rendering the app. */
+export function isDatabaseConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim());
+}
+
 export function connectionString(): string {
   const url = process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim();
   if (!url) {

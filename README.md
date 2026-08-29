@@ -70,25 +70,18 @@ npm run lint        # eslint
 
 ## Vercel 배포
 
-1. **데이터베이스 만들기.** [Neon](https://neon.tech) 또는 Supabase에서 PostgreSQL
-   데이터베이스를 만들고 접속 문자열을 복사합니다. 서버리스에서는 커넥션이 자주
-   열리고 닫히므로 **풀링된(pooled) 엔드포인트**를 쓰세요 — Neon이라면 호스트에
-   `-pooler` 가 붙은 쪽입니다.
-2. **Vercel에 저장소를 연결합니다.** 프레임워크는 Next.js로 자동 인식되며 빌드
-   설정을 따로 만질 필요가 없습니다.
-3. **환경 변수를 설정합니다.** Project Settings → Environment Variables:
+화면에서 무엇을 누르면 되는지는 **[docs/DEPLOY.md](docs/DEPLOY.md)** 에 단계별로 정리해
+두었습니다. 요약하면:
 
-   | 이름 | 값 |
-   |---|---|
-   | `DATABASE_URL` | 1단계에서 복사한 풀링 접속 문자열 (`?sslmode=require` 포함) |
-   | `CRM_AUTO_SEED` | 데모 데이터를 넣으려면 `1`, 빈 상태로 시작하려면 `0` |
+1. GitHub 저장소의 기본 브랜치를 `main` 으로 맞춥니다 (Vercel은 기본 브랜치를 배포합니다).
+2. <https://vercel.com/new> 에서 저장소를 Import 합니다 — Next.js로 자동 인식되므로
+   빌드 설정은 건드릴 것이 없습니다.
+3. 프로젝트 → Storage → Create Database → **Neon** 을 연결합니다.
+   연동이 `DATABASE_URL` 을 자동으로 주입합니다.
+4. Redeploy 합니다. 첫 요청 때 스키마와 데모 데이터가 만들어집니다.
 
-4. **배포합니다.** 첫 요청 때 스키마가 생성되고, `CRM_AUTO_SEED` 가 `0` 이 아니면
-   데모 데이터가 채워집니다. 여러 인스턴스가 동시에 떠도 Postgres 어드바이저리
-   락으로 직렬화되므로 데이터가 중복 생성되지 않습니다.
-
-실서비스로 쓸 때는 `CRM_AUTO_SEED=0` 으로 두고 `npm run db:seed` 대신 실제 데이터를
-넣으시면 됩니다.
+`DATABASE_URL` 이 없으면 흰 화면 대신 설정 안내 화면이 뜨므로, 무엇이 빠졌는지 바로
+알 수 있습니다.
 
 ## 데이터 모델
 
