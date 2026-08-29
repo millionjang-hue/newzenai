@@ -4,13 +4,16 @@
   "private": true,
   "description": "NewZen CRM - lead, pipeline and revenue analytics platform",
   "scripts": {
+    "predev": "node scripts/check-node.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/check-node.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "predb:seed": "node scripts/check-node.mjs",
     "db:seed": "tsx scripts/seed.ts",
-    "db:reset": "rm -f data/crm.db && tsx scripts/seed.ts"
+    "db:reset": "rm -f data/crm.db data/crm.db-shm data/crm.db-wal && tsx scripts/seed.ts"
   },
   "dependencies": {
     "next": "^15.5.24",

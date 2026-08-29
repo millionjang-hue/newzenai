@@ -1,3 +1,11 @@
+/**
+ * The single source of truth for the CRM schema.
+ *
+ * Kept as a TypeScript module rather than a .sql file the app reads at run
+ * time: bundlers include it automatically, so a standalone or serverless
+ * build does not have to ship a loose asset alongside the server.
+ */
+export const SCHEMA_SQL = `
 -- ---------------------------------------------------------------------------
 -- NewZen CRM relational schema (SQLite)
 -- ---------------------------------------------------------------------------
@@ -135,3 +143,4 @@ CREATE TABLE IF NOT EXISTS activities (
 CREATE INDEX IF NOT EXISTS idx_activities_lead ON activities(lead_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_activities_deal ON activities(deal_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_activities_due ON activities(due_at);
+`;

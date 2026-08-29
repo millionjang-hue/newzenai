@@ -1,6 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { SCHEMA_SQL } from "@/lib/db/schema";
+import { seedDatabase } from "@/lib/db/seed";
 
 /**
  * Single process-wide SQLite handle.
@@ -30,14 +32,36 @@ function open(): DatabaseSync {
 }
 
 export function migrate(db: DatabaseSync): void {
-  const schemaFile = path.join(process.cwd(), "src", "lib", "db", "schema.sql");
-  db.exec(fs.readFileSync(schemaFile, "utf8"));
+  db.exec(SCHEMA_SQL);
+}
+
+function isEmpty(db: DatabaseSync): boolean {
+  return (db.prepare(`SELECT COUNT(*) AS n FROM users`).get() as { n: number }).n === 0;
+}
+
+/**
+ * Fills an empty database with the demo dataset so a fresh checkout renders
+ * something on the very first request. Set `CRM_AUTO_SEED=0` to keep a new
+ * install empty (for a real deployment, where you seed your own data instead).
+ */
+function autoSeed(db: DatabaseSync): void {
+  if (process.env.CRM_AUTO_SEED === "0") return;
+  if (!isEmpty(db)) return;
+
+  const started = Date.now();
+  const summary = seedDatabase(db);
+  console.log(
+    `[crm] 데모 데이터를 생성했습니다 (${Date.now() - started}ms): ` +
+      `리드 ${summary.leads} · 기회 ${summary.deals} · 활동 ${summary.activities}. ` +
+      `비우려면 CRM_AUTO_SEED=0 을 설정하세요.`,
+  );
 }
 
 export function getDb(): DatabaseSync {
   if (!globalThis.__crmDb) {
     const db = open();
     migrate(db);
+    autoSeed(db);
     globalThis.__crmDb = db;
   }
   return globalThis.__crmDb;

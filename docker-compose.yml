@@ -1,0 +1,15 @@
+services:
+  crm:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Keeps the SQLite file across rebuilds.
+      - crm-data:/app/data
+    environment:
+      # Set to "0" to start empty instead of loading the demo dataset.
+      CRM_AUTO_SEED: "1"
+    restart: unless-stopped
+
+volumes:
+  crm-data:

@@ -2,8 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // node:sqlite is a Node.js builtin - keep it out of the bundler graph.
-  serverExternalPackages: [],
+  // Emits .next/standalone/server.js - a self-contained server for Docker and
+  // any host that just runs `node server.js`.
+  output: "standalone",
 };
 
 export default nextConfig;
