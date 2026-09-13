@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { cx } from "@/components/ui/primitives";
 
 const NAV = [
-  { href: "/dashboard", label: "대시보드", icon: "▦", hint: "오늘의 현황" },
+  { href: "/today", label: "오늘", icon: "◉", hint: "홈 · 앱 바로가기" },
+  { href: "/dashboard", label: "대시보드", icon: "▦", hint: "영업 현황 요약" },
   { href: "/leads", label: "리드", icon: "◎", hint: "신규 유입 관리" },
   { href: "/pipeline", label: "파이프라인", icon: "▤", hint: "영업 기회 보드" },
   { href: "/analytics", label: "분석", icon: "◔", hint: "매출·전환 지표" },

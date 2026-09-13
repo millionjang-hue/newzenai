@@ -144,10 +144,35 @@ CREATE INDEX IF NOT EXISTS idx_activities_lead ON activities(lead_id, created_at
 CREATE INDEX IF NOT EXISTS idx_activities_deal ON activities(deal_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_activities_due ON activities(due_at);
 CREATE INDEX IF NOT EXISTS idx_activities_owner ON activities(owner_id, created_at);
+
+-- Home-screen app shortcuts. Icons are stored inline as data URIs: they are a
+-- few KB each and keeping them in the row means no object store to provision.
+CREATE TABLE IF NOT EXISTS app_links (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  url         TEXT NOT NULL,
+  icon_data   TEXT,
+  icon_source TEXT NOT NULL DEFAULT 'default' CHECK (icon_source IN ('upload', 'favicon', 'default')),
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  position    DOUBLE PRECISION NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_links_position ON app_links(position);
+
+-- Small singleton key/value store for workspace-level preferences such as the
+-- profile status message on the home screen.
+CREATE TABLE IF NOT EXISTS workspace_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
 `;
 
 /** Wiped in this order so foreign keys are never violated. */
 export const TABLES_IN_DEPENDENCY_ORDER = [
+  "app_links",
+  "workspace_settings",
   "deal_stage_events",
   "activities",
   "deals",
