@@ -164,3 +164,31 @@ export interface ActivityWithOwner extends Activity {
   owner_name: string | null;
   owner_color: string | null;
 }
+
+export type IconSource = "upload" | "favicon" | "default";
+
+export interface AppLink {
+  id: string;
+  name: string;
+  url: string;
+  /** `data:` URI, or null to fall back to the generated default icon. */
+  icon_data: string | null;
+  icon_source: IconSource;
+  enabled: number;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Upload limits, shared by the client picker and the server validation. */
+export const MAX_ICON_BYTES = 256 * 1024;
+export const ALLOWED_ICON_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/avif",
+] as const;

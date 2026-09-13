@@ -712,8 +712,43 @@ export async function seedDatabase(
     }
   }
 
+  // --- app shortcuts ---------------------------------------------------------
+  // Starter set for the home screen. No icons are stored: each one falls back to
+  // the generated default until someone uploads one or fetches the site's own.
+  const appLinkStmt = insert(
+    `INSERT INTO app_links (id, name, url, icon_data, icon_source, enabled, position, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, 'default', ?, ?, ?, ?)`,
+  );
+
+  const APP_LINKS: [string, string, boolean][] = [
+    ["Google 캘린더", "https://calendar.google.com/calendar/", true],
+    ["Google 드라이브", "https://drive.google.com/drive/", true],
+    ["Gmail", "https://mail.google.com/mail/", true],
+    ["ChatGPT", "https://chatgpt.com/", true],
+    ["네이버", "https://www.naver.com/", false],
+    ["Google", "https://www.google.com/", false],
+    ["Notion", "https://www.notion.so/", true],
+    ["Figma", "https://www.figma.com/", false],
+    ["Google 스프레드시트", "https://docs.google.com/spreadsheets/", true],
+    ["Zoom", "https://zoom.us/", false],
+    ["정부24", "https://www.gov.kr/portal/main", false],
+    ["국세청 홈택스", "https://www.hometax.go.kr/", false],
+    ["법제처", "https://www.moleg.go.kr/", false],
+  ];
+
+  APP_LINKS.forEach(([name, url, enabled], index) => {
+    appLinkStmt.run(
+      id("app"), name, url, enabled ? 1 : 0, (index + 1) * 1000, iso(NOW), iso(NOW),
+    );
+  });
+
   try {
     await writer.flush(db);
+    await db.query(
+      `INSERT INTO workspace_settings (key, value, updated_at) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+      ["profile.status_message", "", iso(NOW)],
+    );
     await db.query("COMMIT");
   } catch (error) {
     await db.query("ROLLBACK");
